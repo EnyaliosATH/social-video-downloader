@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Direct Social Video Downloader (X, Instagram, TikTok)
 // @namespace    https://github.com/custom-downloader
-// @version      2.0.0
+// @version      2.2.0
 // @description  X (Twitter), Instagram ve TikTok videolarını reklamsız, yönlendirmesiz tek tıkla doğrudan MP4 olarak indirir.
 // @author       Custom
 // @license      MIT
@@ -77,7 +77,7 @@
         }, duration);
     }
 
-    // İndirme İkonu
+    // İndirme Butonu Oluşturma
     function createDownloadButton() {
         const btn = document.createElement('div');
         btn.className = 'direct-dl-btn';
@@ -91,10 +91,11 @@
         return btn;
     }
 
-    // Videonun ait olduğu gönderi URL'sini bulur
+    // Gönderi URL'sini çözümleme
     function resolvePostUrl(videoEl) {
         const host = location.hostname;
 
+        // X (Twitter)
         if (host.includes('x.com') || host.includes('twitter.com')) {
             const article = videoEl.closest('article');
             if (article) {
@@ -103,6 +104,7 @@
             }
         }
 
+        // Instagram
         if (host.includes('instagram.com')) {
             const article = videoEl.closest('article');
             if (article) {
@@ -111,18 +113,35 @@
             }
         }
 
+        // TikTok (FYP Akışı ve Tekil Video Sayfaları)
         if (host.includes('tiktok.com')) {
-            const container = videoEl.closest('[data-e2e="recommend-list-item-container"], [class*="DivItemContainer"]');
-            if (container) {
-                const videoLink = container.querySelector('a[href*="/video/"]');
-                if (videoLink) return videoLink.href.split('?')[0];
+            // 1. xgplayer container üzerinden video ID yakalama
+            const container = videoEl.closest('[id*="xgwrapper"], [class*="xgplayer-container"]') ||
+                              document.querySelector('[class*="xgplayer-container"]');
+            if (container && container.id) {
+                const idMatch = container.id.match(/-(\d+)$/);
+                if (idMatch) {
+                    return `https://www.tiktok.com/@_/video/${idMatch[1]}`;
+                }
+            }
+
+            // 2. Akıştaki video kapsayıcısından a[href] linki yakalama
+            const itemContainer = videoEl.closest('[data-e2e="recommend-list-item-container"], [class*="DivItemContainer"], [class*="DivVideoWrapper"]');
+            if (itemContainer) {
+                const aLink = itemContainer.querySelector('a[href*="/video/"]');
+                if (aLink) return aLink.href.split('?')[0];
+            }
+
+            // 3. Mevcut adres zaten video URL'si ise
+            if (location.pathname.includes('/video/')) {
+                return location.href.split('?')[0];
             }
         }
 
         return location.href.split('?')[0];
     }
 
-    // Doğrudan Blob/MP4 İndirme Fonksiyonu
+    // Doğrudan Dosya İndirme Fonksiyonu
     function downloadDirectFile(url, filename) {
         showToast('İndirme başlatıldı...');
         GM_download({
@@ -131,7 +150,6 @@
             saveAs: false,
             onload: () => showToast('İndirme tamamlandı!'),
             onerror: () => {
-                // GM_download başarısız olursa Blob fallback
                 GM_xmlhttpRequest({
                     method: 'GET',
                     url: url,
@@ -160,86 +178,100 @@
         const filename = `video_${Date.now()}.mp4`;
         const videoSrc = videoEl.currentSrc || videoEl.src;
 
-        // 1. Eğer video doğrudan MP4 linki barındırıyorsa (blob: değilse) anında indir
+        // 1. Eğer video doğrudan mp4 bağlantısına sahipse (blob değilse)
         if (videoSrc && !videoSrc.startsWith('blob:')) {
             downloadDirectFile(videoSrc, filename);
             return;
         }
 
-        // 2. Video MSE/Blob kullanıyorsa (X, TikTok, Reels) gönderi URL'sini çözümle
         const postUrl = resolvePostUrl(videoEl);
         showToast('Video kaynağı çözümleniyor...');
 
-        // Açık kaynaklı API üzerinden doğrudan medya akışını çek (yeni sekme açmadan)
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: 'https://api.cobalt.tools/api/json',
-            headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json'
-            },
-            data: JSON.stringify({
-                url: postUrl,
-                vQuality: '1080'
-            }),
-            onload: (res) => {
-                try {
-                    const data = JSON.parse(res.responseText);
-                    if (data && data.url) {
-                        downloadDirectFile(data.url, filename);
-                    } else {
-                        showToast('Doğrudan akış alınamadı, alternatif deneniyor...');
-                        fallbackTikTokOrInsta(postUrl, filename);
-                    }
-                } catch (e) {
-                    fallbackTikTokOrInsta(postUrl, filename);
-                }
-            },
-            onerror: () => fallbackTikTokOrInsta(postUrl, filename)
-        });
-    }
+        // X (Twitter) - FxTwitter API
+        if (postUrl.includes('x.com') || postUrl.includes('twitter.com')) {
+            const tweetIdMatch = postUrl.match(/status\/(\d+)/);
+            if (!tweetIdMatch) {
+                showToast('Tweet ID bulunamadı.');
+                return;
+            }
+            const tweetId = tweetIdMatch[1];
 
-    // TikTok ve X için Yedek Çözümleyici (Arka planda sessiz çalışır)
-    function fallbackTikTokOrInsta(postUrl, filename) {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: `https://api.fxtwitter.com/status/${tweetId}`,
+                onload: (res) => {
+                    try {
+                        const json = JSON.parse(res.responseText);
+                        const media = json?.tweet?.media?.videos?.[0] || json?.tweet?.media?.all?.[0];
+                        const downloadUrl = media?.url;
+
+                        if (downloadUrl) {
+                            downloadDirectFile(downloadUrl, filename);
+                        } else {
+                            showToast('Video URL bulunamadı.');
+                        }
+                    } catch (e) {
+                        showToast('X API ayrıştırma hatası.');
+                    }
+                },
+                onerror: () => showToast('X bağlantı hatası.')
+            });
+            return;
+        }
+
+        // TikTok - TikWM API
         if (postUrl.includes('tiktok.com')) {
+            if (!postUrl.includes('/video/')) {
+                showToast('TikTok video ID tespit edilemedi.');
+                return;
+            }
+
             GM_xmlhttpRequest({
                 method: 'GET',
                 url: `https://www.tikwm.com/api/?url=${encodeURIComponent(postUrl)}`,
                 onload: (res) => {
                     try {
                         const json = JSON.parse(res.responseText);
-                        if (json?.data?.play) {
-                            downloadDirectFile(json.data.play, filename);
+                        const playUrl = json?.data?.play || json?.data?.wmplay;
+                        if (playUrl) {
+                            downloadDirectFile(playUrl, filename);
                         } else {
-                            showToast('Video kaynağı bulunamadı.');
+                            showToast('TikTok videosu bulunamadı.');
                         }
                     } catch (e) {
-                        showToast('Hata oluştu.');
+                        showToast('TikTok API hatası.');
                     }
-                }
+                },
+                onerror: () => showToast('TikTok bağlantı hatası.')
             });
-        } else if (postUrl.includes('x.com') || postUrl.includes('twitter.com')) {
-            const apiUrl = postUrl.replace(/(x\.com|twitter\.com)/, 'api.vxtwitter.com');
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: apiUrl,
-                onload: (res) => {
-                    try {
-                        const json = JSON.parse(res.responseText);
-                        const mediaUrl = json?.media_extended?.[0]?.url;
-                        if (mediaUrl) {
-                            downloadDirectFile(mediaUrl, filename);
-                        } else {
-                            showToast('X videosu çözümlenemedi.');
-                        }
-                    } catch (e) {
-                        showToast('X API hatası.');
-                    }
-                }
-            });
-        } else {
-            showToast('Bu video doğrudan indirilemedi.');
+            return;
         }
+
+        // Instagram - Cobalt v10 API
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: 'https://api.cobalt.tools',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({
+                url: postUrl
+            }),
+            onload: (res) => {
+                try {
+                    const data = JSON.parse(res.responseText);
+                    if (data?.url) {
+                        downloadDirectFile(data.url, filename);
+                    } else {
+                        showToast('Video kaynağı alınamadı.');
+                    }
+                } catch (e) {
+                    showToast('İndirme servisi yanıt vermedi.');
+                }
+            },
+            onerror: () => showToast('Sunucuya ulaşılamadı.')
+        });
     }
 
     // Fare Takibi ve Buton Konumlandırma
@@ -260,12 +292,10 @@
     window.addEventListener('mousemove', (e) => {
         const target = e.target;
 
-        // Fare butonun üzerindeyse gizleme
         if (target === downloadBtn || downloadBtn.contains(target)) {
             return;
         }
 
-        // Fare bir videonun üzerinde mi kontrol et
         const videos = document.querySelectorAll('video');
         let foundVideo = null;
 

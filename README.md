@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Userscript](https://img.shields.io/badge/Userscript-Tampermonkey-green.svg)](https://www.tampermonkey.net/)
 [![Platform](https://img.shields.io/badge/Platform-X%20%7C%20Instagram%20%7C%20TikTok-black.svg)](#supported-platforms)
-[![Version](https://img.shields.io/badge/Version-2.0.0-orange.svg)](social-downloader.user.js)
+[![Version](https://img.shields.io/badge/Version-2.2.0-orange.svg)](social-downloader.user.js)
 
 A clean, modern, and lightweight Tampermonkey userscript that adds an elegant floating download button to videos on **X (Twitter)**, **Instagram**, and **TikTok**. Download videos directly as MP4 files with a single click—no annoying redirect websites, no sketchy popup ads, and no registration required.
 
@@ -18,7 +18,8 @@ A clean, modern, and lightweight Tampermonkey userscript that adds an elegant fl
 - 🔄 **Smart Fallback Engine**:
   - Direct MP4 stream detection
   - Handles Blob / Media Source Extensions (MSE) streams seamlessly
-  - Redundant fallback resolvers for high availability (TikWM & VxTwitter APIs)
+  - Redundant fallback resolvers for high availability (FxTwitter, TikWM & Cobalt APIs)
+  - Enhanced TikTok FYP feed & xgplayer container ID extraction
 
 ---
 
