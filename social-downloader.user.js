@@ -1,15 +1,15 @@
 // ==UserScript==
-// @name         Direct Social Video Downloader (X, Instagram, TikTok)
+// @name         Direct Social Video Downloader (Fixed & Robust)
 // @namespace    https://github.com/custom-downloader
-// @version      2.2.0
-// @description  X (Twitter), Instagram ve TikTok videolarını reklamsız, yönlendirmesiz tek tıkla doğrudan MP4 olarak indirir.
-// @author       Custom
-// @license      MIT
+// @version      3.00
+// @description  X, Instagram ve TikTok videolarını doğrudan MP4 olarak indirir.
 // @match        https://x.com/*
 // @match        https://twitter.com/*
 // @match        https://www.instagram.com/*
 // @match        https://www.tiktok.com/*
-// @connect      *
+// @connect      api.fxtwitter.com
+// @connect      www.tikwm.com
+// @connect      api.cobalt.tools
 // @grant        GM_xmlhttpRequest
 // @grant        GM_download
 // @grant        GM_addStyle
@@ -19,33 +19,31 @@
 (function () {
     'use strict';
 
-    // Stil ve Bildirim (Toast) Tasarımı
     GM_addStyle(`
         .direct-dl-btn {
             position: fixed;
             z-index: 2147483647 !important;
-            width: 42px;
-            height: 42px;
+            width: 40px;
+            height: 40px;
             border-radius: 50%;
-            background: rgba(15, 15, 15, 0.85);
-            border: 1.5px solid rgba(255, 255, 255, 0.25);
+            background: rgba(18, 18, 18, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.25);
             display: none;
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            backdrop-filter: blur(6px);
-            transition: transform 0.15s ease, background 0.2s ease, border-color 0.2s ease;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(8px);
+            transition: transform 0.15s ease, background 0.2s ease;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
         }
         .direct-dl-btn:hover {
             background: #1d9bf0;
-            border-color: #fff;
-            transform: scale(1.08);
+            transform: scale(1.1);
         }
         .direct-dl-btn svg {
-            width: 22px;
-            height: 22px;
-            fill: #ffffff;
+            width: 20px;
+            height: 20px;
+            fill: #fff;
             pointer-events: none;
         }
         .direct-dl-toast {
@@ -54,281 +52,237 @@
             right: 24px;
             background: rgba(20, 20, 20, 0.95);
             color: #fff;
-            padding: 12px 18px;
-            border-radius: 8px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            font-size: 14px;
-            font-weight: 500;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-family: system-ui, -apple-system, sans-serif;
+            font-size: 13px;
             z-index: 2147483647;
-            box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+            box-shadow: 0 4px 14px rgba(0,0,0,0.3);
             border: 1px solid rgba(255,255,255,0.1);
             transition: opacity 0.25s ease;
         }
     `);
 
-    function showToast(msg, duration = 3000) {
-        const toast = document.createElement('div');
-        toast.className = 'direct-dl-toast';
-        toast.textContent = msg;
-        document.body.appendChild(toast);
-        setTimeout(() => {
-            toast.style.opacity = '0';
-            setTimeout(() => toast.remove(), 300);
-        }, duration);
-    }
+    const Toast = {
+        show(msg, duration = 3000) {
+            const el = document.createElement('div');
+            el.className = 'direct-dl-toast';
+            el.textContent = msg;
+            document.body.appendChild(el);
+            setTimeout(() => {
+                el.style.opacity = '0';
+                setTimeout(() => el.remove(), 250);
+            }, duration);
+        }
+    };
 
-    // İndirme Butonu Oluşturma
-    function createDownloadButton() {
-        const btn = document.createElement('div');
-        btn.className = 'direct-dl-btn';
-        btn.title = 'Videoyu İndir (MP4)';
-        btn.innerHTML = `
-            <svg viewBox="0 0 24 24">
-                <path d="M12 16l-5-5 1.41-1.41L11 12.17V4h2v8.17l2.59-2.58L17 11l-5 5zm-6 2h12v2H6v-2z"/>
-            </svg>
-        `;
-        document.body.appendChild(btn);
-        return btn;
-    }
+    const HttpClient = {
+        request(options) {
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    ...options,
+                    onload: (res) => {
+                        if (res.status >= 200 && res.status < 300) resolve(res);
+                        else reject(new Error(`HTTP Status ${res.status}`));
+                    },
+                    onerror: reject
+                });
+            });
+        },
+        async getJson(url) {
+            const res = await this.request({ method: 'GET', url });
+            return JSON.parse(res.responseText);
+        },
+        async postJson(url, payload) {
+            const res = await this.request({
+                method: 'POST',
+                url,
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                data: JSON.stringify(payload)
+            });
+            return JSON.parse(res.responseText);
+        }
+    };
 
-    // Gönderi URL'sini çözümleme
-    function resolvePostUrl(videoEl) {
-        const host = location.hostname;
-
-        // X (Twitter)
-        if (host.includes('x.com') || host.includes('twitter.com')) {
-            const article = videoEl.closest('article');
-            if (article) {
-                const statusLink = article.querySelector('a[href*="/status/"]');
-                if (statusLink) return statusLink.href.split('?')[0];
+    const Downloader = {
+        async save(url, filename) {
+            Toast.show('İndirme başlatıldı...');
+            try {
+                await new Promise((resolve, reject) => {
+                    GM_download({
+                        url,
+                        name: filename,
+                        saveAs: false,
+                        onload: resolve,
+                        onerror: reject
+                    });
+                });
+                Toast.show('İndirme tamamlandı!');
+            } catch {
+                try {
+                    const res = await HttpClient.request({ method: 'GET', url, responseType: 'blob' });
+                    const blobUrl = URL.createObjectURL(res.response);
+                    const a = document.createElement('a');
+                    a.href = blobUrl;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+                    Toast.show('İndirme tamamlandı!');
+                } catch {
+                    Toast.show('İndirme başarısız oldu.');
+                }
             }
         }
+    };
 
-        // Instagram
-        if (host.includes('instagram.com')) {
+    // --- STRATEGY PATTERN ---
+    class BaseStrategy {
+        matches(host) { throw new Error('Must implement'); }
+        resolveUrl(videoEl) { return location.href.split('?')[0]; }
+        async getDirectVideoUrl(postUrl) { throw new Error('Must implement'); }
+    }
+
+    class TwitterStrategy extends BaseStrategy {
+        matches(host) { return host.includes('x.com') || host.includes('twitter.com'); }
+        resolveUrl(videoEl) {
             const article = videoEl.closest('article');
-            if (article) {
-                const postLink = article.querySelector('a[href*="/reel/"], a[href*="/p/"], a[href*="/reels/"]');
-                if (postLink) return postLink.href.split('?')[0];
-            }
+            const link = article?.querySelector('a[href*="/status/"]');
+            return link ? link.href.split('?')[0] : location.href.split('?')[0];
         }
+        async getDirectVideoUrl(postUrl) {
+            const tweetId = postUrl.match(/status\/(\d+)/)?.[1];
+            if (!tweetId) throw new Error('Tweet ID tespit edilemedi.');
+            const data = await HttpClient.getJson(`https://api.fxtwitter.com/status/${tweetId}`);
+            const videoUrl = data?.tweet?.media?.videos?.[0]?.url || data?.tweet?.media?.all?.[0]?.url;
+            if (!videoUrl) throw new Error('Tweet videosu bulunamadı.');
+            return videoUrl;
+        }
+    }
 
-        // TikTok (FYP Akışı ve Tekil Video Sayfaları)
-        if (host.includes('tiktok.com')) {
-            // 1. xgplayer container üzerinden video ID yakalama
+    class TikTokStrategy extends BaseStrategy {
+        matches(host) { return host.includes('tiktok.com'); }
+        resolveUrl(videoEl) {
             const container = videoEl.closest('[id*="xgwrapper"], [class*="xgplayer-container"]') ||
                               document.querySelector('[class*="xgplayer-container"]');
-            if (container && container.id) {
-                const idMatch = container.id.match(/-(\d+)$/);
-                if (idMatch) {
-                    return `https://www.tiktok.com/@_/video/${idMatch[1]}`;
-                }
-            }
+            const idMatch = container?.id?.match(/-(\d+)$/);
+            if (idMatch) return `https://www.tiktok.com/@_/video/${idMatch[1]}`;
 
-            // 2. Akıştaki video kapsayıcısından a[href] linki yakalama
-            const itemContainer = videoEl.closest('[data-e2e="recommend-list-item-container"], [class*="DivItemContainer"], [class*="DivVideoWrapper"]');
-            if (itemContainer) {
-                const aLink = itemContainer.querySelector('a[href*="/video/"]');
-                if (aLink) return aLink.href.split('?')[0];
-            }
-
-            // 3. Mevcut adres zaten video URL'si ise
-            if (location.pathname.includes('/video/')) {
-                return location.href.split('?')[0];
-            }
+            const item = videoEl.closest('[data-e2e="recommend-list-item-container"], [class*="DivItemContainer"]');
+            const link = item?.querySelector('a[href*="/video/"]');
+            return link ? link.href.split('?')[0] : location.href.split('?')[0];
         }
-
-        return location.href.split('?')[0];
+        async getDirectVideoUrl(postUrl) {
+            if (!postUrl.includes('/video/')) throw new Error('TikTok video linki çözümlenemedi.');
+            const data = await HttpClient.getJson(`https://www.tikwm.com/api/?url=${encodeURIComponent(postUrl)}`);
+            const playUrl = data?.data?.play || data?.data?.wmplay;
+            if (!playUrl) throw new Error('TikTok videosu ayrıştırılamadı.');
+            return playUrl;
+        }
     }
 
-    // Doğrudan Dosya İndirme Fonksiyonu
-    function downloadDirectFile(url, filename) {
-        showToast('İndirme başlatıldı...');
-        GM_download({
-            url: url,
-            name: filename,
-            saveAs: false,
-            onload: () => showToast('İndirme tamamlandı!'),
-            onerror: () => {
-                GM_xmlhttpRequest({
-                    method: 'GET',
-                    url: url,
-                    responseType: 'blob',
-                    onload: (res) => {
-                        const blobUrl = URL.createObjectURL(res.response);
-                        const a = document.createElement('a');
-                        a.href = blobUrl;
-                        a.download = filename;
-                        document.body.appendChild(a);
-                        a.click();
-                        a.remove();
-                        setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
-                        showToast('İndirme tamamlandı!');
-                    },
-                    onerror: () => showToast('İndirme başarısız oldu.')
-                });
-            }
-        });
+    class InstagramStrategy extends BaseStrategy {
+        matches(host) { return host.includes('instagram.com'); }
+        resolveUrl(videoEl) {
+            const article = videoEl.closest('article');
+            const link = article?.querySelector('a[href*="/reel/"], a[href*="/p/"]');
+            return link ? link.href.split('?')[0] : location.href.split('?')[0];
+        }
+        async getDirectVideoUrl(postUrl) {
+            const data = await HttpClient.postJson('https://api.cobalt.tools', { url: postUrl });
+            if (!data?.url) throw new Error('Instagram kaynağı çözümlenemedi.');
+            return data.url;
+        }
     }
 
-    // Ana İndirme Yöneticisi
-    async function handleDownload(videoEl) {
-        if (!videoEl) return;
+    const strategies = [new TwitterStrategy(), new TikTokStrategy(), new InstagramStrategy()];
+    const activeStrategy = strategies.find(s => s.matches(location.hostname));
+    if (!activeStrategy) return;
 
-        const filename = `video_${Date.now()}.mp4`;
-        const videoSrc = videoEl.currentSrc || videoEl.src;
+    // --- UI & POSITIONING ENGINE ---
+    const btn = document.createElement('div');
+    btn.className = 'direct-dl-btn';
+    btn.title = 'Videoyu İndir';
+    btn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 16l-5-5 1.41-1.41L11 12.17V4h2v8.17l2.59-2.58L17 11l-5 5zm-6 2h12v2H6v-2z"/></svg>`;
+    document.body.appendChild(btn);
 
-        // 1. Eğer video doğrudan mp4 bağlantısına sahipse (blob değilse)
-        if (videoSrc && !videoSrc.startsWith('blob:')) {
-            downloadDirectFile(videoSrc, filename);
-            return;
-        }
+    let currentTargetVideo = null;
 
-        const postUrl = resolvePostUrl(videoEl);
-        showToast('Video kaynağı çözümleniyor...');
-
-        // X (Twitter) - FxTwitter API
-        if (postUrl.includes('x.com') || postUrl.includes('twitter.com')) {
-            const tweetIdMatch = postUrl.match(/status\/(\d+)/);
-            if (!tweetIdMatch) {
-                showToast('Tweet ID bulunamadı.');
-                return;
-            }
-            const tweetId = tweetIdMatch[1];
-
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: `https://api.fxtwitter.com/status/${tweetId}`,
-                onload: (res) => {
-                    try {
-                        const json = JSON.parse(res.responseText);
-                        const media = json?.tweet?.media?.videos?.[0] || json?.tweet?.media?.all?.[0];
-                        const downloadUrl = media?.url;
-
-                        if (downloadUrl) {
-                            downloadDirectFile(downloadUrl, filename);
-                        } else {
-                            showToast('Video URL bulunamadı.');
-                        }
-                    } catch (e) {
-                        showToast('X API ayrıştırma hatası.');
-                    }
-                },
-                onerror: () => showToast('X bağlantı hatası.')
-            });
-            return;
-        }
-
-        // TikTok - TikWM API
-        if (postUrl.includes('tiktok.com')) {
-            if (!postUrl.includes('/video/')) {
-                showToast('TikTok video ID tespit edilemedi.');
-                return;
-            }
-
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: `https://www.tikwm.com/api/?url=${encodeURIComponent(postUrl)}`,
-                onload: (res) => {
-                    try {
-                        const json = JSON.parse(res.responseText);
-                        const playUrl = json?.data?.play || json?.data?.wmplay;
-                        if (playUrl) {
-                            downloadDirectFile(playUrl, filename);
-                        } else {
-                            showToast('TikTok videosu bulunamadı.');
-                        }
-                    } catch (e) {
-                        showToast('TikTok API hatası.');
-                    }
-                },
-                onerror: () => showToast('TikTok bağlantı hatası.')
-            });
-            return;
-        }
-
-        // Instagram - Cobalt v10 API
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: 'https://api.cobalt.tools',
-            headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json'
-            },
-            data: JSON.stringify({
-                url: postUrl
-            }),
-            onload: (res) => {
-                try {
-                    const data = JSON.parse(res.responseText);
-                    if (data?.url) {
-                        downloadDirectFile(data.url, filename);
-                    } else {
-                        showToast('Video kaynağı alınamadı.');
-                    }
-                } catch (e) {
-                    showToast('İndirme servisi yanıt vermedi.');
-                }
-            },
-            onerror: () => showToast('Sunucuya ulaşılamadı.')
-        });
-    }
-
-    // Fare Takibi ve Buton Konumlandırma
-    const downloadBtn = createDownloadButton();
-    let activeVideo = null;
-
-    function updateButtonPosition(video) {
+    function positionButton(video) {
         const rect = video.getBoundingClientRect();
-        if (rect.width < 60 || rect.height < 60) {
-            downloadBtn.style.display = 'none';
-            return;
-        }
-        downloadBtn.style.display = 'flex';
-        downloadBtn.style.top = `${Math.max(10, rect.top + 14)}px`;
-        downloadBtn.style.left = `${Math.max(10, rect.right - 56)}px`;
+        if (rect.width < 120 || rect.height < 120) return;
+
+        currentTargetVideo = video;
+        btn.style.display = 'flex';
+        btn.style.top = `${Math.max(12, rect.top + 14)}px`;
+        btn.style.left = `${Math.max(12, rect.right - 54)}px`;
     }
 
-    window.addEventListener('mousemove', (e) => {
+    // Farenin altındaki en yakın videoyu bulan hafif algoritma
+    function findVideoFromTarget(target) {
+        if (!target || target === document.body || target === document.documentElement) return null;
+        if (target.tagName === 'VIDEO') return target;
+
+        // Overlay katmanlarının kapsayıcısından veya kardeşlerinden videoyu ara
+        const container = target.closest('article, [data-e2e="recommend-list-item-container"], div[class*="video"], div[style*="aspect-ratio"]') || target.parentElement;
+        if (container) {
+            const video = container.querySelector('video');
+            if (video) return video;
+        }
+        return null;
+    }
+
+    // mousemove yerine tekil mouseover dinleyicisi (CPU dostudur, katmanları deler)
+    document.addEventListener('mouseover', (e) => {
         const target = e.target;
+        if (target === btn || btn.contains(target)) return;
 
-        if (target === downloadBtn || downloadBtn.contains(target)) {
-            return;
-        }
-
-        const videos = document.querySelectorAll('video');
-        let foundVideo = null;
-
-        for (const v of videos) {
-            const r = v.getBoundingClientRect();
-            if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
-                if (r.width > 60 && r.height > 60) {
-                    foundVideo = v;
-                    break;
-                }
+        const video = findVideoFromTarget(target);
+        if (video) {
+            positionButton(video);
+        } else if (currentTargetVideo) {
+            const rect = currentTargetVideo.getBoundingClientRect();
+            // Farenin video alanından tamamen çıkıp çıkmadığını kontrol et
+            if (
+                e.clientX < rect.left || e.clientX > rect.right ||
+                e.clientY < rect.top || e.clientY > rect.bottom
+            ) {
+                btn.style.display = 'none';
+                currentTargetVideo = null;
             }
-        }
-
-        if (foundVideo) {
-            activeVideo = foundVideo;
-            updateButtonPosition(foundVideo);
-        } else {
-            downloadBtn.style.display = 'none';
-            activeVideo = null;
         }
     }, { passive: true });
 
+    // Sayfa kaydırıldığında buton pozisyonunu güncelle
     window.addEventListener('scroll', () => {
-        if (activeVideo && downloadBtn.style.display === 'flex') {
-            updateButtonPosition(activeVideo);
+        if (currentTargetVideo && btn.style.display === 'flex') {
+            positionButton(currentTargetVideo);
         }
     }, { passive: true, capture: true });
 
-    downloadBtn.addEventListener('click', (e) => {
+    // Tıklama Yöneticisi
+    btn.addEventListener('click', async (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (activeVideo) {
-            handleDownload(activeVideo);
+
+        if (!currentTargetVideo) return;
+        const video = currentTargetVideo;
+        const filename = `${location.hostname.replace('www.', '')}_${Date.now()}.mp4`;
+
+        const src = video.currentSrc || video.src;
+        if (src && !src.startsWith('blob:')) {
+            await Downloader.save(src, filename);
+            return;
+        }
+
+        try {
+            Toast.show('Video bağlantısı çözümleniyor...');
+            const postUrl = activeStrategy.resolveUrl(video);
+            const downloadUrl = await activeStrategy.getDirectVideoUrl(postUrl);
+            await Downloader.save(downloadUrl, filename);
+        } catch (err) {
+            Toast.show(err.message || 'Hata oluştu.');
         }
     });
 

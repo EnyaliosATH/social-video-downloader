@@ -3,23 +3,22 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Userscript](https://img.shields.io/badge/Userscript-Tampermonkey-green.svg)](https://www.tampermonkey.net/)
 [![Platform](https://img.shields.io/badge/Platform-X%20%7C%20Instagram%20%7C%20TikTok-black.svg)](#supported-platforms)
-[![Version](https://img.shields.io/badge/Version-2.2.0-orange.svg)](social-downloader.user.js)
+[![Version](https://img.shields.io/badge/Version-3.00-orange.svg)](social-downloader.user.js)
 
 A clean, modern, and lightweight Tampermonkey userscript that adds an elegant floating download button to videos on **X (Twitter)**, **Instagram**, and **TikTok**. Download videos directly as MP4 files with a single click—no annoying redirect websites, no sketchy popup ads, and no registration required.
 
 ---
 
-## ✨ Features
+## ✨ Features & Architecture
 
 - ⚡ **One-Click Direct Downloads**: Download videos in highest available quality (up to 1080p) directly as `.mp4`.
+- 🏗️ **Engineered Strategy Pattern**: Decoupled, modular platform architecture (`TwitterStrategy`, `TikTokStrategy`, `InstagramStrategy`) adhering to SOLID principles.
+- 🚀 **CPU-Efficient Hover Engine**: High-performance event delegation using `mouseover` rather than costly `mousemove` loops, designed to pierce transparent overlay divs cleanly.
+- 🛡️ **Explicit `@connect` Whitelist**: Pre-whitelisted endpoints (`api.fxtwitter.com`, `www.tikwm.com`, `api.cobalt.tools`) to avoid annoying Tampermonkey cross-origin permission popups.
 - 🚫 **Ad-Free & No Redirects**: Everything is processed seamlessly in the background without opening unwanted tabs or sending you to ad-heavy download portals.
 - 🎯 **Non-Intrusive Floating UI**: A sleek, dark-themed download button dynamically appears in the top-right corner when you hover over any video element.
-- 🍞 **Real-Time Toast Feedback**: Clear on-screen notifications display status updates (`Resolving source...`, `Downloading...`, `Download complete!`).
-- 🔄 **Smart Fallback Engine**:
-  - Direct MP4 stream detection
-  - Handles Blob / Media Source Extensions (MSE) streams seamlessly
-  - Redundant fallback resolvers for high availability (FxTwitter, TikWM & Cobalt APIs)
-  - Enhanced TikTok FYP feed & xgplayer container ID extraction
+- 🍞 **Real-Time Toast Feedback**: Clean UI notifications display status updates (`Resolving source...`, `Downloading...`, `Download complete!`).
+- 🔄 **Promise-Driven Downloader**: Native `GM_download` with automatic `GM_xmlhttpRequest` Blob stream fallback.
 
 ---
 
